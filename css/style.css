@@ -1,0 +1,1003 @@
+/* ==========================================================================
+   SUBNAUTICA WIKI — style.css
+   Estilos base do projeto: tokens de design, layout geral, cursor 3D,
+   HUD (PDA), menu lateral, indicador de profundidade e caixa wiki (glass).
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. RESET BÁSICO
+   -------------------------------------------------------------------------- */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
+img, iframe {
+  max-width: 100%;
+  display: block;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+ul, ol {
+  list-style: none;
+}
+
+button {
+  font-family: inherit;
+  border: none;
+  background: none;
+  cursor: none; /* o cursor customizado substitui o nativo em toda a UI */
+}
+
+/* --------------------------------------------------------------------------
+   2. TOKENS DE DESIGN (paleta, tipografia, espaçamento, profundidade z)
+   -------------------------------------------------------------------------- */
+:root {
+  /* Paleta — identidade "abismo bioluminescente" */
+  --c-abyss:        #020c14;  /* fundo base, quase preto-azulado */
+  --c-deep:          #04222e;  /* azul profundo secundário */
+  --c-teal:          #0c6478;  /* teal médio — cor "âncora" da marca */
+  --c-cyan:          #36e0c9;  /* ciano bioluminescente — accent principal */
+  --c-cyan-soft:     rgba(54, 224, 201, 0.35);
+  --c-foam:          #d8f3ec;  /* texto claro sobre fundo escuro */
+  --c-foam-dim:      rgba(216, 243, 236, 0.62);
+  --c-lava:          #ff5b2e;  /* accent de calor — biomas profundos */
+  --c-lava-soft:     rgba(255, 91, 46, 0.35);
+  --c-amber:         #ffb347;  /* alertas / HUD secundário */
+  --c-purple-bio:    #9a6bd6;  /* bioluminescência floresta de cogumelos */
+
+  --c-glass-bg:      rgba(6, 26, 34, 0.46);
+  --c-glass-bg-soft: rgba(6, 26, 34, 0.30);
+  --c-glass-border:  rgba(140, 230, 217, 0.22);
+  --c-glass-shadow:  rgba(0, 0, 0, 0.55);
+
+  /* Tipografia — três papéis distintos, nunca a fonte padrão do sistema */
+  --font-display: 'Aldrich', 'Segoe UI', sans-serif;       /* títulos / identidade */
+  --font-hud:     'Share Tech Mono', 'Consolas', monospace; /* leituras numéricas/HUD */
+  --font-body:    'Exo 2', 'Segoe UI', sans-serif;          /* corpo de texto wiki */
+
+  /* Espaçamento */
+  --gap-xs: 0.5rem;
+  --gap-sm: 1rem;
+  --gap-md: 1.75rem;
+  --gap-lg: 3rem;
+  --gap-xl: 5rem;
+
+  /* Camadas (z-index) — mantém a pilha de profundidade previsível */
+  --z-bg-fallback: 0;
+  --z-bg-photo: 1;
+  --z-fog: 2;
+  --z-creatures: 3;
+  --z-fx-canvas: 10;
+  --z-tint: 15;
+  --z-wiki: 20;
+  --z-ui: 90;
+  --z-cursor: 100;
+
+  /* Curva de easing usada nas transições "líquidas" do site */
+  --ease-water: cubic-bezier(0.22, 0.61, 0.18, 1);
+}
+
+/* --------------------------------------------------------------------------
+   3. BASE DO DOCUMENTO
+   -------------------------------------------------------------------------- */
+body {
+  background: var(--c-abyss);
+  color: var(--c-foam);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.6;
+  overflow-x: hidden;
+  cursor: none; /* cursor nativo escondido — ver cursor.js */
+}
+
+/* Em dispositivos sem mouse (touch), o cursor 3D não faz sentido.
+   A classe é aplicada via JS (cursor.js) após detectar o tipo de ponteiro. */
+body.touch-device,
+body.touch-device * {
+  cursor: auto;
+}
+body.touch-device #custom-cursor { display: none; }
+
+::selection {
+  background: var(--c-cyan-soft);
+  color: var(--c-abyss);
+}
+
+/* Foco visível para navegação por teclado — acessibilidade mínima garantida
+   mesmo em um site com cursor customizado. */
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--c-cyan);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+/* Scrollbar temática (Webkit) */
+::-webkit-scrollbar { width: 10px; }
+::-webkit-scrollbar-track { background: var(--c-abyss); }
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(var(--c-teal), var(--c-cyan));
+  border-radius: 6px;
+}
+
+/* --------------------------------------------------------------------------
+   4. CURSOR 3D CUSTOMIZADO (estrutura — comportamento em cursor.js)
+   -------------------------------------------------------------------------- */
+#custom-cursor {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 140px;
+  height: 140px;
+  z-index: var(--z-cursor);
+  pointer-events: none; /* nunca bloqueia cliques no conteúdo real */
+  will-change: transform;
+  transform: translate3d(-50%, -50%, 0);
+}
+
+.cursor-model {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transform: scale(0.85);
+  transition: opacity 0.5s var(--ease-water), transform 0.5s var(--ease-water);
+  pointer-events: none;
+}
+
+.cursor-model.active {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.cursor-embed-wrap {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  filter: drop-shadow(0 0 10px var(--c-cyan-soft));
+  /* O wrapper que efetivamente gira/translada via JS (cursor.js) é
+     o .cursor-model — este filtro só adiciona o brilho de contorno. */
+}
+
+.cursor-embed-wrap iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  pointer-events: none; /* requisito: iframes nunca interceptam eventos */
+  background: transparent;
+}
+
+/* Esconde por completo a legenda/crédito do Sketchfab que vem dentro do
+   wrapper original quando usada como cursor (o crédito completo permanece
+   visível nas legendas de criaturas dos biomas — aqui apenas o modelo). */
+#custom-cursor .sketchfab-embed-wrapper p {
+  position: absolute;
+  width: 1px; height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.cursor-glow {
+  position: absolute;
+  inset: -30%;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--c-cyan-soft) 0%, transparent 70%);
+  filter: blur(6px);
+  z-index: -1;
+  animation: cursorPulse 3.2s ease-in-out infinite;
+}
+
+/* --------------------------------------------------------------------------
+   5. CAMADAS GLOBAIS DE EFEITO (canvas de partículas + tint de profundidade)
+   -------------------------------------------------------------------------- */
+#fx-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: var(--z-fx-canvas);
+  pointer-events: none;
+}
+
+#depth-tint-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-tint);
+  pointer-events: none;
+  background: rgba(10, 40, 50, 0.25);
+  mix-blend-mode: normal;
+  transition: background-color 0.6s linear;
+  will-change: background-color;
+}
+
+#fx-filters {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+/* Aberração cromática leve + distorção térmica aplicadas via filtro SVG
+   em camadas específicas (ver .heat-distort em biomas de lava). */
+.heat-distort {
+  filter: url(#heatDistortFilter);
+}
+.chroma-edge {
+  filter: url(#chromaAberrationFilter);
+}
+
+/* --------------------------------------------------------------------------
+   6. CABEÇALHO — SUPERFÍCIE
+   -------------------------------------------------------------------------- */
+.surface-section {
+  position: relative;
+  height: 100vh;
+  width: 100%;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.surface-bg {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-bg-photo);
+  background-image: var(--bg-img, none);
+  background-size: cover;
+  background-position: center 35%;
+  background-repeat: no-repeat;
+}
+
+.surface-bg-fallback {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-bg-fallback);
+  background: linear-gradient(
+    to bottom,
+    #bfe9ff 0%,
+    #6fc6e8 28%,
+    #2f96c2 52%,
+    #137a9b 75%,
+    #0b5b78 100%
+  );
+}
+
+.surface-sky {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(to bottom, rgba(255,255,255,0.18) 0%, transparent 40%);
+  pointer-events: none;
+}
+
+.aurora-glow {
+  position: absolute;
+  top: 6%;
+  left: 50%;
+  width: 140%;
+  height: 32%;
+  transform: translateX(-50%);
+  z-index: 2;
+  background: radial-gradient(ellipse at center, rgba(180, 255, 240, 0.35) 0%, transparent 65%);
+  filter: blur(12px);
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+
+.clouds-layer,
+.skyray-layer,
+.sun-glare,
+.surface-water-particles {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.cloud {
+  position: absolute;
+  width: 220px;
+  height: 60px;
+  background: radial-gradient(ellipse at center, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0) 75%);
+  border-radius: 50%;
+  filter: blur(2px);
+  opacity: 0.8;
+}
+
+.sun-glare {
+  background: radial-gradient(circle at 70% 18%, rgba(255, 250, 210, 0.9) 0%, rgba(255, 250, 210, 0.18) 18%, transparent 45%);
+  mix-blend-mode: screen;
+}
+
+.skyray {
+  position: absolute;
+  width: 70px;
+  height: 34px;
+  opacity: 0.9;
+  will-change: transform;
+}
+
+.surface-water-particles .water-speck {
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.55);
+}
+
+.capsule-wrap {
+  position: absolute;
+  left: 50%;
+  top: 58%;
+  width: min(420px, 46vw);
+  transform: translate(-50%, -50%);
+  z-index: 4;
+  filter: drop-shadow(0 18px 30px rgba(0,0,0,0.35));
+}
+
+.surface-content {
+  position: relative;
+  z-index: 5;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding-top: 12vh;
+  text-align: center;
+}
+
+.site-title {
+  font-family: var(--font-display);
+  font-size: clamp(2.4rem, 6vw, 5rem);
+  letter-spacing: 0.12em;
+  color: #06303d;
+  text-shadow: 0 2px 18px rgba(255,255,255,0.45);
+}
+
+.site-title span {
+  display: block;
+  font-size: 0.42em;
+  letter-spacing: 0.5em;
+  color: #0b4a5e;
+  margin-top: 0.4em;
+}
+
+.site-subtitle {
+  margin-top: var(--gap-sm);
+  font-family: var(--font-hud);
+  font-size: clamp(0.85rem, 1.4vw, 1.05rem);
+  letter-spacing: 0.06em;
+  color: #0b4a5e;
+  opacity: 0.85;
+}
+
+.dive-cta {
+  margin-top: var(--gap-lg);
+  padding: 0.9rem 2.2rem;
+  border: 1px solid rgba(11, 74, 94, 0.55);
+  border-radius: 999px;
+  font-family: var(--font-hud);
+  font-size: 0.95rem;
+  letter-spacing: 0.08em;
+  color: #06303d;
+  background: rgba(255,255,255,0.18);
+  backdrop-filter: blur(6px);
+  animation: ctaFloat 3.4s ease-in-out infinite;
+  transition: background 0.3s var(--ease-water);
+}
+.dive-cta:hover { background: rgba(255,255,255,0.34); }
+
+.scroll-hint {
+  position: absolute;
+  bottom: 4vh;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  font-family: var(--font-hud);
+  font-size: 0.75rem;
+  letter-spacing: 0.3em;
+  color: #06303d;
+  opacity: 0.75;
+}
+
+/* --------------------------------------------------------------------------
+   7. SEÇÕES DE BIOMA (corpo do mergulho)
+   -------------------------------------------------------------------------- */
+#dive-container {
+  position: relative;
+  z-index: 1;
+}
+
+.biome-section {
+  position: relative;
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  isolation: isolate;
+  padding: var(--gap-xl) var(--gap-md);
+}
+
+.biome-bg-fallback {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-bg-fallback);
+  background: var(--biome-grad, var(--c-deep));
+}
+
+.biome-bg {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-bg-photo);
+  background-image: var(--bg-img, none);
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+  opacity: 0.92;
+}
+
+/* Wrapper externo: alvo do parallax controlado por GSAP/ScrollTrigger
+   (parallax.js). Fica limpo de animação CSS para não disputar a
+   propriedade `transform` com o elemento interno abaixo. */
+.biome-fog-outer {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-fog);
+  overflow: hidden;
+  pointer-events: none;
+  will-change: transform;
+}
+
+/* Elemento interno: carrega o gradiente de névoa e a animação CSS
+   ambiente contínua (fogDrift, em animations.css). */
+.biome-fog {
+  position: absolute;
+  inset: -10%;
+  background:
+    radial-gradient(ellipse 60% 40% at 20% 20%, rgba(255,255,255,0.10), transparent 60%),
+    radial-gradient(ellipse 50% 35% at 80% 75%, rgba(255,255,255,0.07), transparent 55%);
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+
+.biome-fog::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.35) 100%);
+}
+
+.creature-layer {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-creatures);
+  pointer-events: none;
+  overflow: hidden;
+}
+
+/* Elemento individual de criatura — JS injeta o iframe Sketchfab dentro
+   e anima width/transform via cursor.js/fishes.js a cada quadro. */
+.creature {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  will-change: transform;
+  opacity: 0;
+  transition: opacity 1.1s var(--ease-water);
+}
+
+.creature.is-visible { opacity: 1; }
+
+.creature .sketchfab-embed-wrapper,
+.creature iframe {
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  background: transparent;
+}
+
+.creature.size-xs { width: 70px;  height: 56px; }
+.creature.size-sm { width: 130px; height: 100px; }
+.creature.size-md { width: 230px; height: 170px; }
+.creature.size-lg { width: 420px; height: 300px; }
+.creature.size-xl { width: 760px; height: 480px; }
+.creature.size-giant { width: 1200px; height: 620px; }
+
+/* Crédito do Sketchfab embutido em cada criatura: mantido visível, porém
+   discreto, para nunca remover a atribuição exigida. */
+.creature .sketchfab-embed-wrapper p {
+  position: absolute;
+  bottom: -1.4em;
+  left: 0;
+  font-size: 9px !important;
+  white-space: nowrap;
+  opacity: 0.001; /* presente no DOM, mas visualmente quase nulo no fundo do oceano */
+  pointer-events: none;
+}
+
+/* --------------------------------------------------------------------------
+   8. CAIXA WIKI (glassmorphism) — conteúdo enciclopédico de cada bioma
+   -------------------------------------------------------------------------- */
+.wiki-box {
+  position: relative;
+  z-index: var(--z-wiki);
+  width: min(1080px, 92vw);
+  max-height: 84vh;
+  overflow: hidden auto;
+  border-radius: 18px;
+  padding: clamp(1.5rem, 3vw, 2.75rem);
+}
+
+.glass {
+  background: var(--c-glass-bg);
+  border: 1px solid var(--c-glass-border);
+  backdrop-filter: blur(18px) saturate(135%);
+  -webkit-backdrop-filter: blur(18px) saturate(135%);
+  box-shadow:
+    0 30px 60px var(--c-glass-shadow),
+    inset 0 1px 0 rgba(255,255,255,0.06);
+}
+
+.wiki-eyebrow {
+  font-family: var(--font-hud);
+  font-size: 0.72rem;
+  letter-spacing: 0.28em;
+  color: var(--c-cyan);
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+.wiki-title {
+  font-family: var(--font-display);
+  font-size: clamp(1.8rem, 3.4vw, 2.8rem);
+  letter-spacing: 0.03em;
+  color: var(--c-foam);
+  margin-top: 0.35rem;
+  text-shadow: 0 0 18px var(--c-cyan-soft);
+}
+
+.wiki-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 1.4rem;
+  margin-top: 0.9rem;
+  margin-bottom: 1.6rem;
+  font-family: var(--font-hud);
+  font-size: 0.78rem;
+  color: var(--c-foam-dim);
+}
+
+.wiki-meta-row span strong {
+  color: var(--c-cyan);
+  font-weight: 400;
+}
+
+.wiki-divider {
+  height: 1px;
+  background: linear-gradient(to right, var(--c-glass-border), transparent);
+  margin: 1.4rem 0;
+}
+
+.wiki-grid {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: var(--gap-lg);
+  align-items: start;
+}
+
+.wiki-main p {
+  margin-bottom: 1rem;
+  color: var(--c-foam-dim);
+  font-size: 0.98rem;
+}
+
+.wiki-section-label {
+  font-family: var(--font-hud);
+  font-size: 0.78rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--c-cyan);
+  margin: 1.6rem 0 0.6rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.wiki-section-label::before {
+  content: '';
+  width: 14px;
+  height: 1px;
+  background: var(--c-cyan);
+  display: inline-block;
+}
+
+.wiki-main ul.curiosity-list li {
+  position: relative;
+  padding-left: 1.1rem;
+  margin-bottom: 0.55rem;
+  color: var(--c-foam-dim);
+  font-size: 0.92rem;
+}
+.wiki-main ul.curiosity-list li::before {
+  content: '◆';
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: var(--c-cyan);
+  font-size: 0.6rem;
+}
+
+/* Infobox lateral — estilo "ficha técnica" de wiki, em cartão próprio */
+.wiki-infobox {
+  background: var(--c-glass-bg-soft);
+  border: 1px solid var(--c-glass-border);
+  border-radius: 12px;
+  padding: 1.2rem 1.3rem;
+}
+
+.infobox-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  padding: 0.55rem 0;
+  border-bottom: 1px dashed rgba(140,230,217,0.14);
+  font-size: 0.86rem;
+}
+.infobox-row:last-of-type { border-bottom: none; }
+
+.infobox-label {
+  font-family: var(--font-hud);
+  color: var(--c-foam-dim);
+  letter-spacing: 0.03em;
+}
+.infobox-value { color: var(--c-foam); text-align: right; }
+.infobox-value.danger { color: var(--c-lava); }
+
+.infobox-taglist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.3rem;
+  justify-content: flex-end;
+}
+.tag-chip {
+  font-family: var(--font-hud);
+  font-size: 0.68rem;
+  padding: 0.18rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--c-glass-border);
+  color: var(--c-foam-dim);
+  white-space: nowrap;
+}
+
+.infobox-map {
+  margin-top: 1rem;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--c-glass-border);
+  background: rgba(0,0,0,0.25);
+}
+.infobox-map svg { width: 100%; height: auto; display: block; }
+
+.danger-list {
+  margin-top: 0.4rem;
+}
+.danger-list li {
+  font-size: 0.84rem;
+  color: var(--c-foam-dim);
+  margin-bottom: 0.3rem;
+  padding-left: 0.9rem;
+  position: relative;
+}
+.danger-list li::before {
+  content: '!';
+  position: absolute;
+  left: 0;
+  color: var(--c-lava);
+  font-weight: 700;
+}
+
+/* --------------------------------------------------------------------------
+   9. HUD — "PDA" (canto inferior esquerdo)
+   -------------------------------------------------------------------------- */
+#pda-hud {
+  position: fixed;
+  left: var(--gap-sm);
+  bottom: var(--gap-sm);
+  z-index: var(--z-ui);
+  width: 230px;
+  font-family: var(--font-hud);
+  pointer-events: none;
+}
+
+.pda-frame {
+  background: rgba(4, 18, 24, 0.62);
+  border: 1px solid var(--c-glass-border);
+  border-radius: 10px;
+  backdrop-filter: blur(10px);
+  padding: 0.9rem 1rem;
+  box-shadow: 0 12px 30px rgba(0,0,0,0.5), inset 0 0 18px rgba(54,224,201,0.06);
+}
+
+.pda-title {
+  font-size: 0.62rem;
+  letter-spacing: 0.32em;
+  color: var(--c-cyan);
+  opacity: 0.8;
+  margin-bottom: 0.55rem;
+}
+
+.pda-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.32rem 0;
+  font-size: 0.82rem;
+}
+
+.pda-label { color: var(--c-foam-dim); letter-spacing: 0.05em; }
+.pda-value {
+  color: var(--c-cyan);
+  font-size: 0.95rem;
+  text-shadow: 0 0 8px var(--c-cyan-soft);
+}
+.pda-value small { font-size: 0.62em; opacity: 0.75; }
+.pda-value.warn { color: var(--c-lava); text-shadow: 0 0 8px var(--c-lava-soft); }
+
+.pda-o2 { flex-direction: column; align-items: stretch; gap: 0.3rem; }
+.pda-o2-bar {
+  width: 100%;
+  height: 6px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.08);
+  overflow: hidden;
+}
+.pda-o2-fill {
+  height: 100%;
+  width: 92%;
+  background: linear-gradient(to right, var(--c-teal), var(--c-cyan));
+  transition: width 0.5s var(--ease-water);
+}
+
+/* --------------------------------------------------------------------------
+   10. INDICADOR DE PROFUNDIDADE (elemento-assinatura — sonar vertical)
+   -------------------------------------------------------------------------- */
+#depth-indicator {
+  position: fixed;
+  right: var(--gap-sm);
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: var(--z-ui);
+  height: min(58vh, 520px);
+  width: 64px;
+  pointer-events: none;
+}
+
+.depth-readout {
+  font-family: var(--font-hud);
+  text-align: center;
+  font-size: 0.95rem;
+  color: var(--c-cyan);
+  text-shadow: 0 0 10px var(--c-cyan-soft);
+  margin-bottom: 0.6rem;
+}
+.depth-readout small { display: block; font-size: 0.55rem; color: var(--c-foam-dim); letter-spacing: 0.2em; }
+
+.depth-track {
+  position: relative;
+  height: calc(100% - 2.4rem);
+  width: 2px;
+  margin: 0 auto;
+  background: linear-gradient(to bottom, var(--c-cyan-soft), rgba(140,230,217,0.05));
+}
+
+.depth-tick {
+  position: absolute;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 0.6rem;
+  color: var(--c-foam-dim);
+  white-space: nowrap;
+  padding-left: 14px;
+}
+.depth-tick::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 50%;
+  width: 8px;
+  height: 1px;
+  background: var(--c-foam-dim);
+  transform: translateY(-50%);
+}
+.depth-tick.active { color: var(--c-cyan); }
+.depth-tick.active::before { background: var(--c-cyan); box-shadow: 0 0 6px var(--c-cyan); }
+
+.depth-marker {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--c-cyan);
+  box-shadow: 0 0 14px 4px var(--c-cyan-soft);
+  transform: translate(-50%, -50%);
+  will-change: top;
+}
+.depth-marker::after {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  border: 1px solid var(--c-cyan-soft);
+  border-radius: 50%;
+  animation: sonarPing 2.6s ease-out infinite;
+}
+
+/* --------------------------------------------------------------------------
+   11. MENU LATERAL (scroll spy)
+   -------------------------------------------------------------------------- */
+#side-menu {
+  position: fixed;
+  left: var(--gap-sm);
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: var(--z-ui);
+}
+
+#side-menu ul {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+#side-menu a {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  position: relative;
+}
+
+.menu-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1px solid var(--c-foam-dim);
+  background: transparent;
+  transition: background 0.3s var(--ease-water), border-color 0.3s var(--ease-water), transform 0.3s var(--ease-water);
+  flex-shrink: 0;
+}
+
+#side-menu a.active .menu-dot,
+#side-menu a:hover .menu-dot {
+  background: var(--c-cyan);
+  border-color: var(--c-cyan);
+  box-shadow: 0 0 10px var(--c-cyan-soft);
+  transform: scale(1.25);
+}
+
+.menu-label {
+  font-family: var(--font-hud);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: var(--c-foam-dim);
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateX(-6px);
+  transition: opacity 0.3s var(--ease-water), transform 0.3s var(--ease-water);
+}
+#side-menu a:hover .menu-label,
+#side-menu a.active .menu-label {
+  opacity: 1;
+  transform: translateX(0);
+  color: var(--c-cyan);
+}
+
+#menu-toggle {
+  display: none;
+}
+
+/* --------------------------------------------------------------------------
+   12. BOTÕES FLUTUANTES (topo / áudio)
+   -------------------------------------------------------------------------- */
+.float-btn {
+  position: fixed;
+  z-index: var(--z-ui);
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: rgba(4, 18, 24, 0.62);
+  border: 1px solid var(--c-glass-border);
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  color: var(--c-cyan);
+  transition: transform 0.3s var(--ease-water), opacity 0.3s var(--ease-water), background 0.3s var(--ease-water);
+}
+.float-btn:hover { background: rgba(54,224,201,0.18); transform: translateY(-2px); }
+
+#back-to-top {
+  right: var(--gap-sm);
+  bottom: calc(var(--gap-sm) + 96px);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(10px);
+}
+#back-to-top.visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+#audio-toggle {
+  right: var(--gap-sm);
+  bottom: var(--gap-sm);
+}
+
+/* --------------------------------------------------------------------------
+   13. RODAPÉ
+   -------------------------------------------------------------------------- */
+#site-footer {
+  position: relative;
+  z-index: 5;
+  background: linear-gradient(to bottom, #020a10, #010407);
+  padding: var(--gap-xl) var(--gap-md) var(--gap-lg);
+  text-align: center;
+  border-top: 1px solid var(--c-glass-border);
+}
+
+.footer-logo {
+  font-family: var(--font-display);
+  font-size: 1.3rem;
+  letter-spacing: 0.18em;
+  color: var(--c-cyan);
+}
+
+.footer-text {
+  margin-top: 0.8rem;
+  font-size: 0.82rem;
+  color: var(--c-foam-dim);
+  max-width: 560px;
+  margin-inline: auto;
+}
+
+.footer-credits {
+  margin-top: 1.6rem;
+  font-family: var(--font-hud);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  color: rgba(216,243,236,0.4);
+  max-width: 720px;
+  margin-inline: auto;
+  line-height: 1.9;
+}
+
+/* --------------------------------------------------------------------------
+   14. UTILITÁRIOS
+   -------------------------------------------------------------------------- */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.glow-text {
+  text-shadow: 0 0 14px var(--c-cyan-soft);
+}

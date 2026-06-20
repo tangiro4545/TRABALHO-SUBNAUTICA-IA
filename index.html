@@ -1,0 +1,918 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Subnautica Wiki — Enciclopédia Não-Oficial do Planeta 4546B</title>
+<meta name="description" content="Um mergulho interativo pelos biomas de Subnautica: da superfície aos Lagos de Lava, com criaturas vivas, HUD de profundidade e a enciclopédia completa de cada região.">
+
+<!-- Tipografia: três papéis distintos (display / HUD / corpo), nunca a
+     fonte padrão do sistema. Carregada via Google Fonts (precisa de
+     conexão à internet no navegador do visitante). -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Aldrich&family=Share+Tech+Mono&family=Exo+2:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/animations.css">
+<link rel="stylesheet" href="css/responsive.css">
+</head>
+<body>
+
+<!-- ==========================================================================
+     CURSOR 3D CUSTOMIZADO — substitui o cursor nativo (escondido via CSS).
+     Seamoth no início; troca para o Traje Camarão ao alcançar a Floresta
+     de Cogumelos (ver cursor.js).
+     ========================================================================== -->
+<div id="custom-cursor" aria-hidden="true">
+  <div class="cursor-model active" data-model="seamoth">
+    <div class="cursor-embed-wrap"></div>
+  </div>
+  <div class="cursor-model" data-model="prawn">
+    <div class="cursor-embed-wrap"></div>
+  </div>
+  <div class="cursor-glow"></div>
+</div>
+
+<!-- Canvas global de partículas (bolhas + poeira em suspensão) -->
+<canvas id="fx-canvas" aria-hidden="true"></canvas>
+
+<!-- Overlay de cor que tinge a água conforme a profundidade -->
+<div id="depth-tint-overlay" aria-hidden="true"></div>
+
+<!-- Filtros SVG reutilizados: distorção térmica + aberração cromática leve -->
+<svg id="fx-filters" aria-hidden="true">
+  <defs>
+    <filter id="heatDistortFilter" x="-20%" y="-20%" width="140%" height="140%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.012 0.04" numOctaves="2" seed="7" result="turb">
+        <animate attributeName="baseFrequency" dur="9s" values="0.010 0.035;0.018 0.05;0.010 0.035" repeatCount="indefinite"/>
+      </feTurbulence>
+      <feDisplacementMap in="SourceGraphic" in2="turb" scale="12" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+    <filter id="chromaAberrationFilter" x="-10%" y="-10%" width="120%" height="120%">
+      <feColorMatrix type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0" result="redOnly"/>
+      <feOffset in="redOnly" dx="2" dy="0" result="redOffset"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0" in="SourceGraphic" result="greenOnly"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0" in="SourceGraphic" result="blueOnly"/>
+      <feOffset in="blueOnly" dx="-2" dy="0" result="blueOffset"/>
+      <feBlend in="redOffset" in2="greenOnly" mode="screen" result="rg"/>
+      <feBlend in="rg" in2="blueOffset" mode="screen"/>
+    </filter>
+  </defs>
+</svg>
+
+<!-- ==========================================================================
+     HUD — "PDA" (canto inferior esquerdo)
+     ========================================================================== -->
+<div id="pda-hud" aria-hidden="true">
+  <div class="pda-frame">
+    <div class="pda-title">SISTEMA PDA · STATUS</div>
+    <div class="pda-row">
+      <span class="pda-label">PROFUNDIDADE</span>
+      <span class="pda-value" id="hud-depth">0<small>m</small></span>
+    </div>
+    <div class="pda-row">
+      <span class="pda-label">TEMPERATURA</span>
+      <span class="pda-value" id="hud-temp">27<small>°C</small></span>
+    </div>
+    <div class="pda-row">
+      <span class="pda-label">BIOMA</span>
+      <span class="pda-value" id="hud-biome">Superfície</span>
+    </div>
+    <div class="pda-row pda-o2">
+      <span class="pda-label">OXIGÊNIO &nbsp;<span id="hud-o2-value">94%</span></span>
+      <div class="pda-o2-bar"><div class="pda-o2-fill" id="hud-o2-fill"></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ==========================================================================
+     INDICADOR DE PROFUNDIDADE — sonar vertical (elemento-assinatura)
+     ========================================================================== -->
+<aside id="depth-indicator" aria-hidden="true">
+  <div class="depth-readout">
+    <span id="depth-indicator-value">0</span>m
+    <small>PROFUNDIDADE</small>
+  </div>
+  <div class="depth-track">
+    <span class="depth-tick" data-depth="0">0m</span>
+    <span class="depth-tick" data-depth="50">50m</span>
+    <span class="depth-tick" data-depth="100">100m</span>
+    <span class="depth-tick" data-depth="200">200m</span>
+    <span class="depth-tick" data-depth="500">500m</span>
+    <span class="depth-tick" data-depth="900">900m</span>
+    <span class="depth-tick" data-depth="1300">1300m</span>
+    <span class="depth-tick" data-depth="1700">1700m</span>
+    <div class="depth-marker" id="depth-marker"></div>
+  </div>
+</aside>
+
+<!-- ==========================================================================
+     MENU LATERAL (scroll-spy)
+     ========================================================================== -->
+<nav id="side-menu" aria-label="Navegação dos biomas">
+  <button id="menu-toggle" aria-label="Abrir menu de biomas">☰</button>
+  <ul>
+    <li><a href="#superficie" data-target="superficie" class="active"><span class="menu-dot"></span><span class="menu-label">Superfície</span></a></li>
+    <li><a href="#aguas-rasas" data-target="aguas-rasas"><span class="menu-dot"></span><span class="menu-label">Águas Rasas</span></a></li>
+    <li><a href="#floresta-de-algas" data-target="floresta-de-algas"><span class="menu-dot"></span><span class="menu-label">Floresta de Algas</span></a></li>
+    <li><a href="#planaltos-gramados" data-target="planaltos-gramados"><span class="menu-dot"></span><span class="menu-label">Planaltos Gramados</span></a></li>
+    <li><a href="#floresta-de-cogumelos" data-target="floresta-de-cogumelos"><span class="menu-dot"></span><span class="menu-label">Floresta de Cogumelos</span></a></li>
+    <li><a href="#zona-de-algas-sanguineas" data-target="zona-de-algas-sanguineas"><span class="menu-dot"></span><span class="menu-label">Algas Sanguíneas</span></a></li>
+    <li><a href="#rio-perdido" data-target="rio-perdido"><span class="menu-dot"></span><span class="menu-label">Rio Perdido</span></a></li>
+    <li><a href="#zona-de-lava-inativa" data-target="zona-de-lava-inativa"><span class="menu-dot"></span><span class="menu-label">Lava Inativa</span></a></li>
+    <li><a href="#lagos-de-lava" data-target="lagos-de-lava"><span class="menu-dot"></span><span class="menu-label">Lagos de Lava</span></a></li>
+    <li><a href="#instalacao-de-contencao-primaria" data-target="instalacao-de-contencao-primaria"><span class="menu-dot"></span><span class="menu-label">Contenção Primária</span></a></li>
+  </ul>
+</nav>
+
+<button id="back-to-top" class="float-btn" aria-label="Voltar ao topo">▲</button>
+<button id="audio-toggle" class="float-btn" aria-label="Ativar som ambiente">🔇</button>
+
+<!-- ==========================================================================
+     CABEÇALHO — SUPERFÍCIE
+     ========================================================================== -->
+<header id="superficie" class="biome-section surface-section">
+  <div class="surface-bg-fallback"></div>
+  <div class="surface-bg" style="background-image:url('assets/img/superficie.jpg');"></div>
+  <div class="surface-sky"></div>
+  <div class="aurora-glow"></div>
+  <div class="clouds-layer"></div>
+  <div class="skyray-layer"></div>
+  <div class="sun-glare"></div>
+  <div class="surface-water-particles"></div>
+
+  <div class="surface-content">
+    <h1 class="site-title">SUBNAUTICA <span>WIKI</span></h1>
+    <p class="site-subtitle">ENCICLOPÉDIA NÃO-OFICIAL · PLANETA 4546B</p>
+    <button id="dive-cta" class="dive-cta">Iniciar Mergulho ↓</button>
+  </div>
+
+  <div class="scroll-hint">ROLE PARA MERGULHAR</div>
+</header>
+
+<!-- ==========================================================================
+     CORPO DO MERGULHO — BIOMAS
+     ========================================================================== -->
+<main id="dive-container">
+
+  <!-- ============================== 01 · ÁGUAS RASAS ============================== -->
+  <section class="biome-section" id="aguas-rasas"
+            style="--biome-grad: linear-gradient(to bottom, #2bb4d6, #0c5570); --bg-img: url('assets/img/aguas_rasas.webp');">
+    <div class="biome-bg-fallback"></div>
+    <div class="biome-bg"></div>
+    <div class="biome-fog-outer"><div class="biome-fog"></div></div>
+    <div class="creature-layer" data-biome="aguas-rasas"></div>
+
+    <article class="wiki-box glass reveal-init">
+      <div class="wiki-eyebrow">BIOMA · 01 · ZONA SOLAR</div>
+      <h2 class="wiki-title">Águas Rasas</h2>
+      <div class="wiki-meta-row">
+        <span><strong>Profundidade:</strong> 0 – 30 m</span>
+        <span><strong>Temperatura média:</strong> 23°C</span>
+        <span><strong>Nível de risco:</strong> Baixo</span>
+      </div>
+      <div class="wiki-divider"></div>
+
+      <div class="wiki-grid">
+        <div class="wiki-main">
+          <p>As Águas Rasas formam a primeira camada habitável do oceano de 4546B — uma região iluminada e turquesa onde a luz solar ainda penetra com força total. Antigas estruturas de recife se erguem do leito arenoso, criando arcos e cavidades que servem de abrigo para pequenos cardumes.</p>
+          <p>É quase sempre o primeiro bioma explorado por quem chega à superfície do planeta, funcionando como uma zona de transição segura antes do mergulho em direção às regiões mais profundas e hostis.</p>
+
+          <div class="wiki-section-label">Curiosidades</div>
+          <ul class="curiosity-list">
+            <li>É geralmente a primeira região explorada após qualquer naufrágio na superfície.</li>
+            <li>A abundância de luz solar permite uma fotossíntese intensa nas plantas e corais locais.</li>
+            <li>Cardumes de Peeper costumam se esconder nas fendas dos antigos recifes.</li>
+          </ul>
+        </div>
+
+        <aside class="wiki-infobox">
+          <div class="infobox-row"><span class="infobox-label">Fauna</span></div>
+          <div class="infobox-taglist">
+            <span class="tag-chip">Peeper</span><span class="tag-chip">Boomerang</span>
+            <span class="tag-chip">Bladderfish</span><span class="tag-chip">Gasopod</span>
+          </div>
+
+          <div class="infobox-row"><span class="infobox-label">Flora</span></div>
+          <div class="infobox-taglist">
+            <span class="tag-chip">Corais-leque</span><span class="tag-chip">Algas-de-recife</span>
+            <span class="tag-chip">Esponjas luminosas</span>
+          </div>
+
+          <div class="infobox-row">
+            <span class="infobox-label">Profundidade</span>
+            <span class="infobox-value">0 – 30 m</span>
+          </div>
+          <div class="infobox-row">
+            <span class="infobox-label">Recursos</span>
+            <span class="infobox-value">Calcita, Cobre, Quartzo</span>
+          </div>
+
+          <div class="wiki-section-label">Perigos</div>
+          <ul class="danger-list">
+            <li>Correntes superficiais podem confundir a navegação.</li>
+            <li>Gasopods liberam gás irritante quando perturbados.</li>
+          </ul>
+
+          <div class="wiki-section-label">Mapa</div>
+          <div class="infobox-map">
+            <svg viewBox="0 0 220 90" xmlns="http://www.w3.org/2000/svg">
+              <defs><linearGradient id="mg-aguas" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#5fd0e0"/><stop offset="100%" stop-color="#020c14"/>
+              </linearGradient></defs>
+              <rect width="220" height="90" fill="url(#mg-aguas)" opacity="0.5"/>
+              <line x1="34" y1="6" x2="34" y2="84" stroke="rgba(216,243,236,0.25)" stroke-dasharray="2,3"/>
+              <text x="6" y="12" font-size="6" fill="#d8f3ec" opacity="0.6">SUPERFÍCIE</text>
+              <text x="6" y="86" font-size="6" fill="#d8f3ec" opacity="0.6">ABISMO</text>
+              <circle cx="34" cy="9" r="4" fill="#36e0c9"><animate attributeName="r" values="4;6;4" dur="2.4s" repeatCount="indefinite"/></circle>
+              <line x1="34" y1="9" x2="200" y2="9" stroke="#36e0c9" stroke-dasharray="2,2" opacity="0.6"/>
+              <text x="150" y="7" font-size="7" fill="#36e0c9">30m</text>
+            </svg>
+          </div>
+        </aside>
+      </div>
+    </article>
+  </section>
+
+  <!-- ============================== 02 · FLORESTA DE ALGAS ============================== -->
+  <section class="biome-section" id="floresta-de-algas"
+            style="--biome-grad: linear-gradient(to bottom, #146a4a, #06281c); --bg-img: url('assets/img/algas.webp');">
+    <div class="biome-bg-fallback"></div>
+    <div class="biome-bg"></div>
+    <div class="biome-fog-outer"><div class="biome-fog"></div></div>
+    <div class="creature-layer" data-biome="floresta-de-algas"></div>
+
+    <article class="wiki-box glass reveal-init">
+      <div class="wiki-eyebrow">BIOMA · 02 · DOSSEL VERDE</div>
+      <h2 class="wiki-title">Floresta de Algas</h2>
+      <div class="wiki-meta-row">
+        <span><strong>Profundidade:</strong> 30 – 150 m</span>
+        <span><strong>Temperatura média:</strong> 19°C</span>
+        <span><strong>Nível de risco:</strong> Baixo-Médio</span>
+      </div>
+      <div class="wiki-divider"></div>
+
+      <div class="wiki-grid">
+        <div class="wiki-main">
+          <p>Talos gigantes de algas se erguem do fundo como colunas vivas, filtrando a luz solar em feixes esverdeados que atravessam a penumbra. A densidade da vegetação reduz significativamente a visibilidade, criando corredores estreitos entre os talos.</p>
+          <p>É um dos biomas mais extensos do planeta, funcionando como zona de transição entre as águas iluminadas da superfície e as regiões mais profundas e abertas dos planaltos.</p>
+
+          <div class="wiki-section-label">Curiosidades</div>
+          <ul class="curiosity-list">
+            <li>Os talos de alga podem ultrapassar vinte metros de altura.</li>
+            <li>Stalkers costumam utilizar destroços metálicos para afiar os dentes.</li>
+            <li>A penumbra constante reduz drasticamente o alcance de visão dos exploradores.</li>
+          </ul>
+        </div>
+
+        <aside class="wiki-infobox">
+          <div class="infobox-row"><span class="infobox-label">Fauna</span></div>
+          <div class="infobox-taglist">
+            <span class="tag-chip">Peeper</span><span class="tag-chip">Boomerang</span>
+            <span class="tag-chip">Bladderfish</span><span class="tag-chip">Stalker</span>
+          </div>
+
+          <div class="infobox-row"><span class="infobox-label">Flora</span></div>
+          <div class="infobox-taglist">
+            <span class="tag-chip">Algas-gigantes</span><span class="tag-chip">Grama-rastejante</span>
+            <span class="tag-chip">Couve-do-mar</span>
+          </div>
+
+          <div class="infobox-row">
+            <span class="infobox-label">Profundidade</span>
+            <span class="infobox-value">30 – 150 m</span>
+          </div>
+          <div class="infobox-row">
+            <span class="infobox-label">Recursos</span>
+            <span class="infobox-value">Titânio, Cobre, Destroços</span>
+          </div>
+
+          <div class="wiki-section-label">Perigos</div>
+          <ul class="danger-list">
+            <li>Stalkers podem se tornar agressivos perto de metal exposto.</li>
+            <li>Baixa visibilidade dificulta a orientação entre os talos.</li>
+          </ul>
+
+          <div class="wiki-section-label">Mapa</div>
+          <div class="infobox-map">
+            <svg viewBox="0 0 220 90" xmlns="http://www.w3.org/2000/svg">
+              <defs><linearGradient id="mg-algas" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#5fd0e0"/><stop offset="100%" stop-color="#020c14"/>
+              </linearGradient></defs>
+              <rect width="220" height="90" fill="url(#mg-algas)" opacity="0.5"/>
+              <line x1="34" y1="6" x2="34" y2="84" stroke="rgba(216,243,236,0.25)" stroke-dasharray="2,3"/>
+              <text x="6" y="12" font-size="6" fill="#d8f3ec" opacity="0.6">SUPERFÍCIE</text>
+              <text x="6" y="86" font-size="6" fill="#d8f3ec" opacity="0.6">ABISMO</text>
+              <circle cx="34" cy="12" r="4" fill="#36e0c9"><animate attributeName="r" values="4;6;4" dur="2.4s" repeatCount="indefinite"/></circle>
+              <line x1="34" y1="12" x2="200" y2="12" stroke="#36e0c9" stroke-dasharray="2,2" opacity="0.6"/>
+              <text x="150" y="10" font-size="7" fill="#36e0c9">90m</text>
+            </svg>
+          </div>
+        </aside>
+      </div>
+    </article>
+  </section>
+
+  <!-- ============================== 03 · PLANALTOS GRAMADOS ============================== -->
+  <section class="biome-section" id="planaltos-gramados"
+            style="--biome-grad: linear-gradient(to bottom, #2f7fa0, #123244); --bg-img: url('assets/img/grama_vermelha.webp');">
+    <div class="biome-bg-fallback"></div>
+    <div class="biome-bg"></div>
+    <div class="biome-fog-outer"><div class="biome-fog"></div></div>
+    <div class="creature-layer" data-biome="planaltos-gramados"></div>
+
+    <article class="wiki-box glass reveal-init">
+      <div class="wiki-eyebrow">BIOMA · 03 · CAMPOS ABERTOS</div>
+      <h2 class="wiki-title">Planaltos Gramados</h2>
+      <div class="wiki-meta-row">
+        <span><strong>Profundidade:</strong> 100 – 170 m</span>
+        <span><strong>Temperatura média:</strong> 17°C</span>
+        <span><strong>Nível de risco:</strong> Médio</span>
+      </div>
+      <div class="wiki-divider"></div>
+
+      <div class="wiki-grid">
+        <div class="wiki-main">
+          <p>Planícies onduladas cobertas por uma vegetação rasteira de tom vermelho-intenso se estendem por uma vasta área, pontuadas por formações rochosas verticais que se erguem como monumentos solitários sobre o leito arenoso.</p>
+          <p>O terreno aberto oferece pouca cobertura, o que torna a região particularmente arriscada — predadores que se camuflam sob a areia podem emergir sem aviso.</p>
+
+          <div class="wiki-section-label">Curiosidades</div>
+          <ul class="curiosity-list">
+            <li>A coloração avermelhada da vegetação resulta de pigmentos adaptados à luz residual.</li>
+            <li>As formações rochosas verticais funcionam como pontos de referência natural.</li>
+            <li>Sand Sharks detectam vibrações no solo para localizar presas em movimento.</li>
+          </ul>
+        </div>
+
+        <aside class="wiki-infobox">
+          <div class="infobox-row"><span class="infobox-label">Fauna</span></div>
+          <div class="infobox-taglist">
+            <span class="tag-chip">Peeper</span><span class="tag-chip">Boomerang</span>
+            <span class="tag-chip">Bladderfish</span><span class="tag-chip">Sand Shark</span>
+          </div>
+
+          <div class="infobox-row"><span class="infobox-label">Flora</span></div>
+          <div class="infobox-taglist">
+            <span class="tag-chip">Grama-vermelha</span><span class="tag-chip">Pele-de-pedra</span>
+            <span class="tag-chip">Arbustos-rastejantes</span>
+          </div>
+
+          <div class="infobox-row">
+            <span class="infobox-label">Profundidade</span>
+            <span class="infobox-value">100 – 170 m</span>
+          </div>
+          <div class="infobox-row">
+            <span class="infobox-label">Recursos</span>
+            <span class="infobox-value">Quartzo, Calcita, Magnésio</span>
+          </div>
+
+          <div class="wiki-section-label">Perigos</div>
+          <ul class="danger-list">
+            <li>Sand Sharks podem emergir repentinamente da areia.</li>
+            <li>O terreno aberto oferece pouco abrigo em caso de ataque.</li>
+          </ul>
+
+          <div class="wiki-section-label">Mapa</div>
+          <div class="infobox-map">
+            <svg viewBox="0 0 220 90" xmlns="http://www.w3.org/2000/svg">
+              <defs><linearGradient id="mg-grama" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#5fd0e0"/><stop offset="100%" stop-color="#020c14"/>
+              </linearGradient></defs>
+              <rect width="220" height="90" fill="url(#mg-grama)" opacity="0.5"/>
+              <line x1="34" y1="6" x2="34" y2="84" stroke="rgba(216,243,236,0.25)" stroke-dasharray="2,3"/>
+              <text x="6" y="12" font-size="6" fill="#d8f3ec" opacity="0.6">SUPERFÍCIE</text>
+              <text x="6" y="86" font-size="6" fill="#d8f3ec" opacity="0.6">ABISMO</text>
+              <circle cx="34" cy="14.5" r="4" fill="#36e0c9"><animate attributeName="r" values="4;6;4" dur="2.4s" repeatCount="indefinite"/></circle>
+              <line x1="34" y1="14.5" x2="200" y2="14.5" stroke="#36e0c9" stroke-dasharray="2,2" opacity="0.6"/>
+              <text x="148" y="12.5" font-size="7" fill="#36e0c9">150m</text>
+            </svg>
+          </div>
+        </aside>
+      </div>
+    </article>
+  </section>
+
+  <!-- ============================== 04 · FLORESTA DE COGUMELOS ============================== -->
+  <section class="biome-section" id="floresta-de-cogumelos"
+            style="--biome-grad: linear-gradient(to bottom, #157a82, #052b30); --bg-img: url('assets/img/floresta_de_cogumelos.webp');">
+    <div class="biome-bg-fallback"></div>
+    <div class="biome-bg"></div>
+    <div class="biome-fog-outer"><div class="biome-fog"></div></div>
+    <div class="creature-layer" data-biome="floresta-de-cogumelos"></div>
+
+    <article class="wiki-box glass reveal-init">
+      <div class="wiki-eyebrow">BIOMA · 04 · DOSSEL BIOLUMINESCENTE</div>
+      <h2 class="wiki-title">Floresta de Cogumelos</h2>
+      <div class="wiki-meta-row">
+        <span><strong>Profundidade:</strong> 150 – 300 m</span>
+        <span><strong>Temperatura média:</strong> 15°C</span>
+        <span><strong>Nível de risco:</strong> Médio</span>
+      </div>
+      <div class="wiki-divider"></div>
+
+      <div class="wiki-grid">
+        <div class="wiki-main">
+          <p>Estruturas gigantes em forma de cogumelo se erguem em camadas, formando um dossel labiríntico banhado por uma luz azul-turquesa. Vinhas bioluminescentes serpenteiam pelos troncos, pulsando suavemente na penumbra.</p>
+          <p>O terreno vertical e os múltiplos níveis tornam a navegação mais complexa do que nos biomas anteriores — é justamente aqui que a maioria dos exploradores troca seu veículo leve por um equipamento mais robusto.</p>
+
+          <div class="wiki-section-label">Curiosidades</div>
+          <ul class="curiosity-list">
+            <li>Os enormes "chapéus" funcionam como abrigo natural contra predadores maiores.</li>
+            <li>A bioluminescência das vinhas atrai pequenas presas durante os períodos de escuridão.</li>
+            <li>É neste bioma que exploradores costumam trocar o Seamoth pelo Traje Camarão, devido ao terreno mais labiríntico.</li>
+          </ul>
+        </div>
+
+        <aside class="wiki-infobox">
+          <div class="infobox-row"><span class="infobox-label">Fauna</span></div>
+          <div class="infobox-taglist">
+            <span class="tag-chip">Peeper</span><span class="tag-chip">Boomerang</span>
+            <span class="tag-chip">Bladderfish</span><span class="tag-chip">Jellyray</span>
+          </div>
+
+          <div class="infobox-row"><span class="infobox-label">Flora</span></div>
+          <div class="infobox-taglist">
+            <span class="tag-chip">Cogumelos-gigantes</span><span class="tag-chip">Vinha-luminosa</span>
+            <span class="tag-chip">Esporos-flutuantes</span>
+          </div>
+
+          <div class="infobox-row">
+            <span class="infobox-label">Profundidade</span>
+            <span class="infobox-value">150 – 300 m</span>
+          </div>
+          <div class="infobox-row">
+            <span class="infobox-label">Recursos</span>
+            <span class="infobox-value">Titânio, Cristal-cogumelo, Lítio</span>
+          </div>
+
+          <div class="wiki-section-label">Perigos</div>
+          <ul class="danger-list">
+            <li>Esporos liberados pelos cogumelos podem reduzir a visibilidade.</li>
+            <li>O terreno vertical dificulta manobras com veículos maiores.</li>
+          </ul>
+
+          <div class="wiki-section-label">Mapa</div>
+          <div class="infobox-map">
+            <svg viewBox="0 0 220 90" xmlns="http://www.w3.org/2000/svg">
+              <defs><linearGradient id="mg-cogumelos" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#5fd0e0"/><stop offset="100%" stop-color="#020c14"/>
+              </linearGradient></defs>
+              <rect width="220" height="90" fill="url(#mg-cogumelos)" opacity="0.5"/>
+              <line x1="34" y1="6" x2="34" y2="84" stroke="rgba(216,243,236,0.25)" stroke-dasharray="2,3"/>
+              <text x="6" y="12" font-size="6" fill="#d8f3ec" opacity="0.6">SUPERFÍCIE</text>
+              <text x="6" y="86" font-size="6" fill="#d8f3ec" opacity="0.6">ABISMO</text>
+              <circle cx="34" cy="19" r="4" fill="#36e0c9"><animate attributeName="r" values="4;6;4" dur="2.4s" repeatCount="indefinite"/></circle>
+              <line x1="34" y1="19" x2="200" y2="19" stroke="#36e0c9" stroke-dasharray="2,2" opacity="0.6"/>
+              <text x="148" y="17" font-size="7" fill="#36e0c9">250m</text>
+            </svg>
+          </div>
+        </aside>
+      </div>
+    </article>
+  </section>
+
+  <!-- ============================== 05 · ZONA DE ALGAS SANGUÍNEAS ============================== -->
+  <section class="biome-section" id="zona-de-algas-sanguineas"
+            style="--biome-grad: linear-gradient(to bottom, #16275c, #050a1c); --bg-img: url('assets/img/oleo_sangueneo.webp');">
+    <div class="biome-bg-fallback"></div>
+    <div class="biome-bg"></div>
+    <div class="biome-fog-outer"><div class="biome-fog"></div></div>
+    <div class="creature-layer" data-biome="zona-de-algas-sanguineas"></div>
+
+    <article class="wiki-box glass reveal-init">
+      <div class="wiki-eyebrow">BIOMA · 05 · ABISMO AZUL</div>
+      <h2 class="wiki-title">Zona de Algas Sanguíneas</h2>
+      <div class="wiki-meta-row">
+        <span><strong>Profundidade:</strong> 300 – 500 m</span>
+        <span><strong>Temperatura média:</strong> 9°C</span>
+        <span><strong>Nível de risco:</strong> Alto</span>
+      </div>
+      <div class="wiki-divider"></div>
+
+      <div class="wiki-grid">
+        <div class="wiki-main">
+          <p>Um breu azul-marinho quase absoluto envolve os altos talos de algas sanguíneas, cuja silhueta só é percebida quando filamentos bioluminescentes esbranquiçados se acendem na escuridão. É um dos pontos mais desorientadores de todo o oceano.</p>
+          <p>Pulsos de luz esporádicos cortam a penumbra — sinal de que um Crabsquid está próximo, utilizando descargas bioelétricas tanto para caçar quanto para se comunicar.</p>
+
+          <div class="wiki-section-label">Curiosidades</div>
+          <ul class="curiosity-list">
+            <li>O nome do bioma vem da coloração avermelhada dos talos, visível apenas sob luz artificial direta.</li>
+            <li>Os pulsos de luz do Crabsquid podem interferir temporariamente em equipamentos eletrônicos próximos.</li>
+            <li>A escuridão quase total torna esta uma das zonas mais traiçoeiras para navegação.</li>
+          </ul>
+        </div>
+
+        <aside class="wiki-infobox">
+          <div class="infobox-row"><span class="infobox-label">Fauna</span></div>
+          <div class="infobox-taglist">
+            <span class="tag-chip">Peeper</span><span class="tag-chip">Boomerang</span>
+            <span class="tag-chip">Bladderfish</span><span class="tag-chip">Crabsquid</span>
+          </div>
+
+          <div class="infobox-row"><span class="infobox-label">Flora</span></div>
+          <div class="infobox-taglist">
+            <span class="tag-chip">Talos-sanguíneos</span><span class="tag-chip">Filamentos-fantasma</span>
+            <span class="tag-chip">Líquens-abissais</span>
+          </div>
+
+          <div class="infobox-row">
+            <span class="infobox-label">Profundidade</span>
+            <span class="infobox-value">300 – 500 m</span>
+          </div>
+          <div class="infobox-row">
+            <span class="infobox-label">Recursos</span>
+            <span class="infobox-value">Lítio, Cristal-de-jade</span>
+          </div>
+
+          <div class="wiki-section-label">Perigos</div>
+          <ul class="danger-list">
+            <li>Pulsos eletromagnéticos do Crabsquid podem desativar luzes e instrumentos.</li>
+            <li>Escuridão quase total exige iluminação artificial constante.</li>
+          </ul>
+
+          <div class="wiki-section-label">Mapa</div>
+          <div class="infobox-map">
+            <svg viewBox="0 0 220 90" xmlns="http://www.w3.org/2000/svg">
+              <defs><linearGradient id="mg-sangue" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#5fd0e0"/><stop offset="100%" stop-color="#020c14"/>
+              </linearGradient></defs>
+              <rect width="220" height="90" fill="url(#mg-sangue)" opacity="0.5"/>
+              <line x1="34" y1="6" x2="34" y2="84" stroke="rgba(216,243,236,0.25)" stroke-dasharray="2,3"/>
+              <text x="6" y="12" font-size="6" fill="#d8f3ec" opacity="0.6">SUPERFÍCIE</text>
+              <text x="6" y="86" font-size="6" fill="#d8f3ec" opacity="0.6">ABISMO</text>
+              <circle cx="34" cy="25.5" r="4" fill="#36e0c9"><animate attributeName="r" values="4;6;4" dur="2.4s" repeatCount="indefinite"/></circle>
+              <line x1="34" y1="25.5" x2="200" y2="25.5" stroke="#36e0c9" stroke-dasharray="2,2" opacity="0.6"/>
+              <text x="148" y="23.5" font-size="7" fill="#36e0c9">400m</text>
+            </svg>
+          </div>
+        </aside>
+      </div>
+    </article>
+  </section>
+
+  <!-- ============================== 06 · RIO PERDIDO ============================== -->
+  <section class="biome-section" id="rio-perdido"
+            style="--biome-grad: linear-gradient(to bottom, #2c3a22, #0c130a); --bg-img: url('assets/img/rio_perdido.webp');">
+    <div class="biome-bg-fallback"></div>
+    <div class="biome-bg"></div>
+    <div class="biome-fog-outer"><div class="biome-fog"></div></div>
+    <div class="creature-layer" data-biome="rio-perdido"></div>
+
+    <article class="wiki-box glass reveal-init">
+      <div class="wiki-eyebrow">BIOMA · 06 · VEIA ANCESTRAL</div>
+      <h2 class="wiki-title">Rio Perdido</h2>
+      <div class="wiki-meta-row">
+        <span><strong>Profundidade:</strong> 500 – 750 m</span>
+        <span><strong>Temperatura média:</strong> 21°C</span>
+        <span><strong>Nível de risco:</strong> Alto</span>
+      </div>
+      <div class="wiki-divider"></div>
+
+      <div class="wiki-grid">
+        <div class="wiki-main">
+          <p>Um leito de rio submerso e esverdeado conecta as regiões superiores do oceano às zonas vulcânicas mais profundas. Entre formações ósseas fossilizadas — restos de leviatãs há muito extintos — cogumelos bioluminescentes pontuam a escuridão com um brilho azulado.</p>
+          <p>Ghost Rays deslizam silenciosamente entre as estruturas, enquanto, em raras ocasiões, a silhueta distante de um Ghost Leviathan Juvenil atravessa lentamente o cenário ao fundo.</p>
+
+          <div class="wiki-section-label">Curiosidades</div>
+          <ul class="curiosity-list">
+            <li>Os restos esqueléticos encontrados aqui sugerem que a região já foi território de predadores muito maiores.</li>
+            <li>A água mais quente, em comparação às zonas vizinhas, indica proximidade com atividade vulcânica.</li>
+            <li>O Rio Perdido conecta as regiões superiores do oceano às zonas de lava mais profundas.</li>
+          </ul>
+        </div>
+
+        <aside class="wiki-infobox">
+          <div class="infobox-row"><span class="infobox-label">Fauna</span></div>
+          <div class="infobox-taglist">
+            <span class="tag-chip">Peeper</span><span class="tag-chip">Boomerang</span>
+            <span class="tag-chip">Bladderfish</span><span class="tag-chip">Ghost Ray</span>
+            <span class="tag-chip">Ghost Leviathan (Juvenil)</span>
+          </div>
+
+          <div class="infobox-row"><span class="infobox-label">Flora</span></div>
+          <div class="infobox-taglist">
+            <span class="tag-chip">Cogumelos-fantasma</span><span class="tag-chip">Árvores-ósseas</span>
+            <span class="tag-chip">Musgo-luminoso</span>
+          </div>
+
+          <div class="infobox-row">
+            <span class="infobox-label">Profundidade</span>
+            <span class="infobox-value">500 – 750 m</span>
+          </div>
+          <div class="infobox-row">
+            <span class="infobox-label">Recursos</span>
+            <span class="infobox-value">Diamante, Urânio bruto</span>
+          </div>
+
+          <div class="wiki-section-label">Perigos</div>
+          <ul class="danger-list">
+            <li>Avistamentos raros de um Ghost Leviathan Juvenil cruzando a região.</li>
+            <li>Restos esqueléticos sugerem presença histórica de grandes predadores.</li>
+          </ul>
+
+          <div class="wiki-section-label">Mapa</div>
+          <div class="infobox-map">
+            <svg viewBox="0 0 220 90" xmlns="http://www.w3.org/2000/svg">
+              <defs><linearGradient id="mg-rio" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#5fd0e0"/><stop offset="100%" stop-color="#020c14"/>
+              </linearGradient></defs>
+              <rect width="220" height="90" fill="url(#mg-rio)" opacity="0.5"/>
+              <line x1="34" y1="6" x2="34" y2="84" stroke="rgba(216,243,236,0.25)" stroke-dasharray="2,3"/>
+              <text x="6" y="12" font-size="6" fill="#d8f3ec" opacity="0.6">SUPERFÍCIE</text>
+              <text x="6" y="86" font-size="6" fill="#d8f3ec" opacity="0.6">ABISMO</text>
+              <circle cx="34" cy="34" r="4" fill="#36e0c9"><animate attributeName="r" values="4;6;4" dur="2.4s" repeatCount="indefinite"/></circle>
+              <line x1="34" y1="34" x2="200" y2="34" stroke="#36e0c9" stroke-dasharray="2,2" opacity="0.6"/>
+              <text x="148" y="32" font-size="7" fill="#36e0c9">600m</text>
+            </svg>
+          </div>
+        </aside>
+      </div>
+    </article>
+  </section>
+
+  <!-- ============================== 07 · ZONA DE LAVA INATIVA ============================== -->
+  <section class="biome-section" id="zona-de-lava-inativa"
+            style="--biome-grad: linear-gradient(to bottom, #4a3a20, #160f08); --bg-img: url('assets/img/zona_de_lava_inativa.webp');">
+    <div class="biome-bg-fallback"></div>
+    <div class="biome-bg"></div>
+    <div class="biome-fog-outer"><div class="biome-fog"></div></div>
+    <div class="heat-shimmer-layer heat-distort" style="position:absolute; inset:0; background:radial-gradient(ellipse 70% 50% at 50% 60%, rgba(255,120,60,0.10), transparent 70%); pointer-events:none;"></div>
+    <div class="creature-layer" data-biome="zona-de-lava-inativa"></div>
+
+    <article class="wiki-box glass reveal-init">
+      <div class="wiki-eyebrow">BIOMA · 07 · LIMIAR DO MAGMA</div>
+      <h2 class="wiki-title">Zona de Lava Inativa</h2>
+      <div class="wiki-meta-row">
+        <span><strong>Profundidade:</strong> 750 – 1000 m</span>
+        <span><strong>Temperatura média:</strong> 48°C</span>
+        <span><strong>Nível de risco:</strong> Crítico</span>
+      </div>
+      <div class="wiki-divider"></div>
+
+      <div class="wiki-grid">
+        <div class="wiki-main">
+          <p>Um terreno rochoso e vulcânico, pontuado por fissuras adormecidas, se estende sob uma neblina densa e ambarina. O calor irradiado das rochas distorce visivelmente a água ao redor, e brasas distantes piscam fracamente na escuridão.</p>
+          <p>É aqui que se confirma a presença do Sea Dragon Leviathan — um dos maiores e mais temidos predadores já catalogados no planeta — deslizando lentamente entre as formações rochosas.</p>
+
+          <div class="wiki-section-label">Curiosidades</div>
+          <ul class="curiosity-list">
+            <li>Apesar do nome, a atividade vulcânica nesta zona está apenas parcialmente adormecida.</li>
+            <li>A distorção visual constante é causada pelo calor irradiado das fissuras rochosas.</li>
+            <li>O Sea Dragon Leviathan é um dos maiores predadores conhecidos do planeta.</li>
+          </ul>
+        </div>
+
+        <aside class="wiki-infobox">
+          <div class="infobox-row"><span class="infobox-label">Fauna</span></div>
+          <div class="infobox-taglist">
+            <span class="tag-chip">Sea Dragon Leviathan</span>
+          </div>
+
+          <div class="infobox-row"><span class="infobox-label">Flora</span></div>
+          <div class="infobox-taglist">
+            <span class="tag-chip">Líquens-térmicos</span><span class="tag-chip">Vegetação resistente ao calor</span>
+          </div>
+
+          <div class="infobox-row">
+            <span class="infobox-label">Profundidade</span>
+            <span class="infobox-value">750 – 1000 m</span>
+          </div>
+          <div class="infobox-row">
+            <span class="infobox-label">Recursos</span>
+            <span class="infobox-value">Urânio bruto, Magnetita</span>
+          </div>
+
+          <div class="wiki-section-label">Perigos</div>
+          <ul class="danger-list">
+            <li>Temperatura elevada exige proteção térmica adequada.</li>
+            <li class="infobox-value danger">Presença confirmada de Sea Dragon Leviathan.</li>
+          </ul>
+
+          <div class="wiki-section-label">Mapa</div>
+          <div class="infobox-map">
+            <svg viewBox="0 0 220 90" xmlns="http://www.w3.org/2000/svg">
+              <defs><linearGradient id="mg-lavainativa" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#5fd0e0"/><stop offset="100%" stop-color="#020c14"/>
+              </linearGradient></defs>
+              <rect width="220" height="90" fill="url(#mg-lavainativa)" opacity="0.5"/>
+              <line x1="34" y1="6" x2="34" y2="84" stroke="rgba(216,243,236,0.25)" stroke-dasharray="2,3"/>
+              <text x="6" y="12" font-size="6" fill="#d8f3ec" opacity="0.6">SUPERFÍCIE</text>
+              <text x="6" y="86" font-size="6" fill="#d8f3ec" opacity="0.6">ABISMO</text>
+              <circle cx="34" cy="45.5" r="4" fill="#ff8a4a"><animate attributeName="r" values="4;6;4" dur="2.4s" repeatCount="indefinite"/></circle>
+              <line x1="34" y1="45.5" x2="200" y2="45.5" stroke="#ff8a4a" stroke-dasharray="2,2" opacity="0.6"/>
+              <text x="148" y="43.5" font-size="7" fill="#ff8a4a">860m</text>
+            </svg>
+          </div>
+        </aside>
+      </div>
+    </article>
+  </section>
+
+  <!-- ============================== 08 · LAGOS DE LAVA ============================== -->
+  <section class="biome-section" id="lagos-de-lava"
+            style="--biome-grad: linear-gradient(to bottom, #9a3a12, #2c0c03); --bg-img: url('assets/img/lago_de_lava.webp');">
+    <div class="biome-bg-fallback"></div>
+    <div class="biome-bg"></div>
+    <div class="biome-fog-outer"><div class="biome-fog"></div></div>
+    <div class="heat-shimmer-layer heat-distort" style="position:absolute; inset:0; background:radial-gradient(ellipse 80% 60% at 50% 70%, rgba(255,91,46,0.22), transparent 72%); pointer-events:none;"></div>
+    <div class="creature-layer" data-biome="lagos-de-lava"></div>
+
+    <article class="wiki-box glass reveal-init">
+      <div class="wiki-eyebrow">BIOMA · 08 · NÚCLEO ABERTO</div>
+      <h2 class="wiki-title">Lagos de Lava</h2>
+      <div class="wiki-meta-row">
+        <span><strong>Profundidade:</strong> 1000 – 1400 m</span>
+        <span><strong>Temperatura média:</strong> 92°C</span>
+        <span><strong>Nível de risco:</strong> Extremo</span>
+      </div>
+      <div class="wiki-divider"></div>
+
+      <div class="wiki-grid">
+        <div class="wiki-main">
+          <p>Lagos abertos de rocha derretida e gêiseres de magma dominam esta região — um dos ambientes mais hostis já catalogados no planeta. Colunas de água superaquecida e fumaça sobem constantemente das fendas no leito rochoso.</p>
+          <p>Apenas equipamentos com isolamento térmico avançado permitem qualquer exploração prolongada. Um Sea Dragon Leviathan patrulha lentamente os rios de fogo que cortam a região.</p>
+
+          <div class="wiki-section-label">Curiosidades</div>
+          <ul class="curiosity-list">
+            <li>Os gêiseres de lava podem disparar jatos de magma em intervalos regulares.</li>
+            <li>A temperatura da água nesta região está entre as mais altas já registradas no planeta.</li>
+            <li>Apenas trajes com isolamento térmico avançado tornam a permanência viável.</li>
+          </ul>
+        </div>
+
+        <aside class="wiki-infobox">
+          <div class="infobox-row"><span class="infobox-label">Fauna</span></div>
+          <div class="infobox-taglist">
+            <span class="tag-chip">Sea Dragon Leviathan</span>
+          </div>
+
+          <div class="infobox-row"><span class="infobox-label">Flora</span></div>
+          <div class="infobox-taglist">
+            <span class="tag-chip">Praticamente inexistente</span>
+          </div>
+
+          <div class="infobox-row">
+            <span class="infobox-label">Profundidade</span>
+            <span class="infobox-value">1000 – 1400 m</span>
+          </div>
+          <div class="infobox-row">
+            <span class="infobox-label">Recursos</span>
+            <span class="infobox-value">Diamante, Núcleo de magma</span>
+          </div>
+
+          <div class="wiki-section-label">Perigos</div>
+          <ul class="danger-list">
+            <li class="infobox-value danger">Jatos de lava podem causar dano térmico instantâneo.</li>
+            <li>Calor extremo e gases dissolvidos na água.</li>
+          </ul>
+
+          <div class="wiki-section-label">Mapa</div>
+          <div class="infobox-map">
+            <svg viewBox="0 0 220 90" xmlns="http://www.w3.org/2000/svg">
+              <defs><linearGradient id="mg-lagolava" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#5fd0e0"/><stop offset="100%" stop-color="#020c14"/>
+              </linearGradient></defs>
+              <rect width="220" height="90" fill="url(#mg-lagolava)" opacity="0.5"/>
+              <line x1="34" y1="6" x2="34" y2="84" stroke="rgba(216,243,236,0.25)" stroke-dasharray="2,3"/>
+              <text x="6" y="12" font-size="6" fill="#d8f3ec" opacity="0.6">SUPERFÍCIE</text>
+              <text x="6" y="86" font-size="6" fill="#d8f3ec" opacity="0.6">ABISMO</text>
+              <circle cx="34" cy="65" r="4" fill="#ff5b2e"><animate attributeName="r" values="4;6;4" dur="2.4s" repeatCount="indefinite"/></circle>
+              <line x1="34" y1="65" x2="200" y2="65" stroke="#ff5b2e" stroke-dasharray="2,2" opacity="0.6"/>
+              <text x="142" y="63" font-size="7" fill="#ff5b2e">1300m</text>
+            </svg>
+          </div>
+        </aside>
+      </div>
+    </article>
+  </section>
+
+  <!-- ============================== 09 · INSTALAÇÃO DE CONTENÇÃO PRIMÁRIA ============================== -->
+  <section class="biome-section" id="instalacao-de-contencao-primaria"
+            style="--biome-grad: linear-gradient(to bottom, #1d5650, #051c19); --bg-img: url('assets/img/instalação_de_contenção_primaria.webp');">
+    <div class="biome-bg-fallback"></div>
+    <div class="biome-bg"></div>
+    <div class="biome-fog-outer"><div class="biome-fog"></div></div>
+    <div class="creature-layer" data-biome="instalacao-de-contencao-primaria"></div>
+
+    <article class="wiki-box glass reveal-init">
+      <div class="wiki-eyebrow">BIOMA · 09 · SANTUÁRIO ANCESTRAL</div>
+      <h2 class="wiki-title">Instalação de Contenção Primária</h2>
+      <div class="wiki-meta-row">
+        <span><strong>Profundidade:</strong> 1400 – 1700+ m</span>
+        <span><strong>Temperatura média:</strong> 30°C</span>
+        <span><strong>Nível de risco:</strong> Desconhecido</span>
+      </div>
+      <div class="wiki-divider"></div>
+
+      <div class="wiki-grid">
+        <div class="wiki-main">
+          <p>No ponto mais profundo já catalogado nesta enciclopédia, uma estrutura alienígena ancestral se ergue na escuridão, seus corredores iluminados por uma luminescência verde-esmeralda suave. A arquitetura não corresponde a nenhuma tecnologia conhecida.</p>
+          <p>É neste santuário que repousa o último Sea Emperor Leviathan — uma espécie gigante, porém serena, nadando lentamente entre câmaras erguidas por uma civilização há muito desaparecida, enquanto cardumes tranquilos de Peeper, Boomerang e Bladderfish circulam por perto, como se ignorassem todo o perigo das zonas acima.</p>
+
+          <div class="wiki-section-label">Curiosidades</div>
+          <ul class="curiosity-list">
+            <li>A arquitetura da instalação não corresponde a nenhuma tecnologia conhecida da humanidade.</li>
+            <li>O Sea Emperor Leviathan é considerado uma espécie pacífica, ao contrário dos demais leviatãs do planeta.</li>
+            <li>É o ponto mais profundo catalogado nesta enciclopédia.</li>
+          </ul>
+        </div>
+
+        <aside class="wiki-infobox">
+          <div class="infobox-row"><span class="infobox-label">Fauna</span></div>
+          <div class="infobox-taglist">
+            <span class="tag-chip">Sea Emperor Leviathan</span><span class="tag-chip">Peeper</span>
+            <span class="tag-chip">Boomerang</span><span class="tag-chip">Bladderfish</span>
+          </div>
+
+          <div class="infobox-row"><span class="infobox-label">Flora</span></div>
+          <div class="infobox-taglist">
+            <span class="tag-chip">Não catalogada (ambiente artificial)</span>
+          </div>
+
+          <div class="infobox-row">
+            <span class="infobox-label">Profundidade</span>
+            <span class="infobox-value">1400 – 1700+ m</span>
+          </div>
+          <div class="infobox-row">
+            <span class="infobox-label">Recursos</span>
+            <span class="infobox-value">Tecnologia precursora</span>
+          </div>
+
+          <div class="wiki-section-label">Perigos</div>
+          <ul class="danger-list">
+            <li>Estruturas antigas podem estar parcialmente instáveis.</li>
+            <li>Pressão extrema exige o mais alto nível de proteção conhecido.</li>
+          </ul>
+
+          <div class="wiki-section-label">Mapa</div>
+          <div class="infobox-map">
+            <svg viewBox="0 0 220 90" xmlns="http://www.w3.org/2000/svg">
+              <defs><linearGradient id="mg-instalacao" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#5fd0e0"/><stop offset="100%" stop-color="#020c14"/>
+              </linearGradient></defs>
+              <rect width="220" height="90" fill="url(#mg-instalacao)" opacity="0.5"/>
+              <line x1="34" y1="6" x2="34" y2="84" stroke="rgba(216,243,236,0.25)" stroke-dasharray="2,3"/>
+              <text x="6" y="12" font-size="6" fill="#d8f3ec" opacity="0.6">SUPERFÍCIE</text>
+              <text x="6" y="86" font-size="6" fill="#d8f3ec" opacity="0.6">ABISMO</text>
+              <circle cx="34" cy="82" r="4" fill="#36e0c9"><animate attributeName="r" values="4;6;4" dur="2.4s" repeatCount="indefinite"/></circle>
+              <line x1="34" y1="82" x2="200" y2="82" stroke="#36e0c9" stroke-dasharray="2,2" opacity="0.6"/>
+              <text x="142" y="80" font-size="7" fill="#36e0c9">1700m</text>
+            </svg>
+          </div>
+        </aside>
+      </div>
+    </article>
+  </section>
+
+</main>
+
+<!-- ==========================================================================
+     RODAPÉ
+     ========================================================================== -->
+<footer id="site-footer">
+  <div class="footer-logo">SUBNAUTICA WIKI</div>
+  <p class="footer-text">Um projeto não-oficial, feito por fãs, com fins educacionais e demonstrativos. Subnautica é uma propriedade da Unknown Worlds Entertainment.</p>
+  <p class="footer-credits">
+    Modelos 3D via Sketchfab: "The Seamoth" por nordestewind · "Exosuit Arm Torpedo Launcher" por Fox3D ·
+    "Peeper", "Boomerang", "Bladderfish", "Sandshark", "Jellyray", "Ghost Leviathan" por gavinpgamer1 ·
+    "Gasopod", "Crabsquid", "Ghost_Ray", "Sea Dragon" por Fox3D · "Stalker" por DusanZderic ·
+    "Subnautica - Sea emperor" por joaopedro.grigolon. Todos os créditos permanecem vinculados aos embeds originais do Sketchfab.
+  </p>
+</footer>
+
+<!-- ==========================================================================
+     ÁUDIO AMBIENTE (um por bioma + superfície) — trocado com fade em main.js
+     ========================================================================== -->
+<div id="audio-pool" hidden aria-hidden="true">
+  <audio id="audio-superficie" preload="none" loop><source src="assets/audio/superficie.mp3" type="audio/mpeg"></audio>
+  <audio id="audio-aguas-rasas" preload="none" loop><source src="assets/audio/aguas-rasas.mp3" type="audio/mpeg"></audio>
+  <audio id="audio-floresta-de-algas" preload="none" loop><source src="assets/audio/floresta-de-algas.mp3" type="audio/mpeg"></audio>
+  <audio id="audio-planaltos-gramados" preload="none" loop><source src="assets/audio/planaltos-gramados.mp3" type="audio/mpeg"></audio>
+  <audio id="audio-floresta-de-cogumelos" preload="none" loop><source src="assets/audio/floresta-de-cogumelos.mp3" type="audio/mpeg"></audio>
+  <audio id="audio-zona-de-algas-sanguineas" preload="none" loop><source src="assets/audio/zona-de-algas-sanguineas.mp3" type="audio/mpeg"></audio>
+  <audio id="audio-rio-perdido" preload="none" loop><source src="assets/audio/rio-perdido.mp3" type="audio/mpeg"></audio>
+  <audio id="audio-zona-de-lava-inativa" preload="none" loop><source src="assets/audio/zona-de-lava-inativa.mp3" type="audio/mpeg"></audio>
+  <audio id="audio-lagos-de-lava" preload="none" loop><source src="assets/audio/lagos-de-lava.mp3" type="audio/mpeg"></audio>
+  <audio id="audio-instalacao-de-contencao-primaria" preload="none" loop><source src="assets/audio/instalacao-de-contencao-primaria.mp3" type="audio/mpeg"></audio>
+</div>
+
+<!-- ==========================================================================
+     BIBLIOTECAS EXTERNAS (CDN) — carregadas antes dos módulos do projeto
+     ========================================================================== -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<!-- ==========================================================================
+     MÓDULOS DO PROJETO (defer preserva a ordem de execução)
+     ========================================================================== -->
+<script src="js/main.js" defer></script>
+<script src="js/cursor.js" defer></script>
+<script src="js/parallax.js" defer></script>
+<script src="js/particles.js" defer></script>
+<script src="js/fishes.js" defer></script>
+<script src="js/scroll.js" defer></script>
+
+</body>
+</html>
